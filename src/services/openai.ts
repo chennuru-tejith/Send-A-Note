@@ -132,7 +132,7 @@ Generate 3 unique, personalized chat reply options. Focus on the recipient's bac
       // Parse output into suggestions (split by double newlines, clean up numbers/bullets if AI included them anyway)
       const suggestions = text
         .split(/\n\n+/)
-        .map((s: string) => s.replace(/^[1-3][\.\)-]\s*/, '').trim()) // remove numbering if present
+        .map((s: string) => s.replace(/^[1-3][.)-]\s*/, '').trim()) // remove numbering if present
         .filter((s: string) => s.length > 0)
         .slice(0, 3); // Return max 3 suggestions
 
