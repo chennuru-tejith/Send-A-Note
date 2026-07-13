@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn AI Smart Writer",
+  "version": "1.0.0",
+  "description": "Generate highly personalized connection requests and chat messages inside LinkedIn using AI.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.linkedin.com/*",
+    "https://api.openai.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.linkedin.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
