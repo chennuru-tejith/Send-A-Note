@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Check, Copy, RefreshCw, AlertCircle, ChevronDown } from 'lucide-react';
 import { ProfileDetails, UserPreferences, MessageTone } from '../types';
+import { getPreferences } from '../services/storage';
 
 interface ConnectAssistantProps {
   profile: ProfileDetails;
-  preferences: UserPreferences;
   nativeTextarea: HTMLTextAreaElement;
   onClose: () => void;
 }
@@ -24,12 +24,18 @@ const TONES: MessageTone[] = ['Professional', 'Friendly', 'Formal', 'Confident',
 
 export const ConnectAssistant: React.FC<ConnectAssistantProps> = ({
   profile,
-  preferences,
   nativeTextarea,
   onClose
 }) => {
+  const [prefs, setPrefs] = useState<UserPreferences>({
+    openAiKey: '',
+    defaultTone: 'Professional',
+    defaultLength: 'Medium',
+    defaultPurpose: 'Networking',
+    isPremium: false,
+  });
   const [category, setCategory] = useState(CATEGORIES[0]);
-  const [tone, setTone] = useState(preferences.defaultTone);
+  const [tone, setTone] = useState<MessageTone>('Professional');
   const [customPrompt, setCustomPrompt] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,6 +45,31 @@ export const ConnectAssistant: React.FC<ConnectAssistantProps> = ({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [toneDropdownOpen, setToneDropdownOpen] = useState(false);
 
+  // Load preferences from storage and listen for updates
+  useEffect(() => {
+    getPreferences().then((loadedPrefs) => {
+      setPrefs(loadedPrefs);
+      setTone(loadedPrefs.defaultTone);
+    });
+
+    const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (changes.preferences) {
+        const newPrefs = changes.preferences.newValue as UserPreferences;
+        setPrefs(newPrefs);
+      }
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener(handleStorageChange);
+    }
+
+    return () => {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.removeListener(handleStorageChange);
+      }
+    };
+  }, []);
+
   // Detect character limit from native textarea
   useEffect(() => {
     if (nativeTextarea) {
@@ -46,10 +77,10 @@ export const ConnectAssistant: React.FC<ConnectAssistantProps> = ({
       if (nativeMax) {
         setCharacterLimit(parseInt(nativeMax, 10));
       } else {
-        setCharacterLimit(preferences.isPremium ? 300 : 200);
+        setCharacterLimit(prefs.isPremium ? 300 : 200);
       }
     }
-  }, [nativeTextarea, preferences.isPremium]);
+  }, [nativeTextarea, prefs.isPremium]);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -58,7 +89,7 @@ export const ConnectAssistant: React.FC<ConnectAssistantProps> = ({
 
     try {
       // Send message to background script
-      const reqPrefs = { ...preferences, defaultTone: tone };
+      const reqPrefs = { ...prefs, defaultTone: tone };
       chrome.runtime.sendMessage(
         {
           action: 'GENERATE_MESSAGES',

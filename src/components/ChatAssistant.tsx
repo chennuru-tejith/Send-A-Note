@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, Check, Copy, RefreshCw, AlertCircle, Send } from 'lucide-react';
 import { ProfileDetails, UserPreferences, MessageTone } from '../types';
+import { getPreferences } from '../services/storage';
 
 interface ChatAssistantProps {
   profile: ProfileDetails;
-  preferences: UserPreferences;
   nativeTextarea: HTMLDivElement | HTMLTextAreaElement; // LinkedIn uses contenteditable div or textarea
   chatHistory: string[];
   onInsertMessage: (text: string) => void;
@@ -26,16 +26,47 @@ const TONES: MessageTone[] = ['Professional', 'Friendly', 'Formal', 'Confident',
 
 export const ChatAssistant: React.FC<ChatAssistantProps> = ({
   profile,
-  preferences,
   chatHistory,
   onInsertMessage
 }) => {
-  const [tone, setTone] = useState<MessageTone>(preferences.defaultTone);
+  const [prefs, setPrefs] = useState<UserPreferences>({
+    openAiKey: '',
+    defaultTone: 'Professional',
+    defaultLength: 'Medium',
+    defaultPurpose: 'Networking',
+    isPremium: false,
+  });
+  const [tone, setTone] = useState<MessageTone>('Professional');
   const [customPrompt, setCustomPrompt] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  // Load preferences from storage and listen for updates
+  useEffect(() => {
+    getPreferences().then((loadedPrefs) => {
+      setPrefs(loadedPrefs);
+      setTone(loadedPrefs.defaultTone);
+    });
+
+    const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (changes.preferences) {
+        const newPrefs = changes.preferences.newValue as UserPreferences;
+        setPrefs(newPrefs);
+      }
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener(handleStorageChange);
+    }
+
+    return () => {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.removeListener(handleStorageChange);
+      }
+    };
+  }, []);
 
   const handleGenerate = async (promptCategory: string, userText?: string) => {
     setLoading(true);
@@ -43,7 +74,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
     setSuggestions([]);
 
     try {
-      const reqPrefs = { ...preferences, defaultTone: tone };
+      const reqPrefs = { ...prefs, defaultTone: tone };
       chrome.runtime.sendMessage(
         {
           action: 'GENERATE_MESSAGES',

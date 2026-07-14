@@ -2,8 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { ProfileParser } from './parser';
 import { ConnectAssistant } from '../components/ConnectAssistant';
 import { ChatAssistant } from '../components/ChatAssistant';
-import { getPreferences } from '../services/storage';
-import { ProfileDetails, UserPreferences } from '../types';
+import { ProfileDetails } from '../types';
 import styles from './content.css?inline';
 
 // Global configurations
@@ -28,7 +27,7 @@ const createShadowHost = (id: string): { host: HTMLDivElement; root: ShadowRoot 
 };
 
 // --- Connection Request Modal Handler ---
-const handleConnectModal = (textarea: HTMLTextAreaElement, prefs: UserPreferences) => {
+const handleConnectModal = (textarea: HTMLTextAreaElement) => {
   // Locate the parent modal container to insert our card
   const modalContainer = textarea.closest('.artdeco-modal__content') || textarea.parentElement;
   if (!modalContainer) return;
@@ -68,7 +67,6 @@ const handleConnectModal = (textarea: HTMLTextAreaElement, prefs: UserPreference
   reactRoot.render(
     <ConnectAssistant
       profile={profile}
-      preferences={prefs}
       nativeTextarea={textarea}
       onClose={onClose}
     />
@@ -76,18 +74,10 @@ const handleConnectModal = (textarea: HTMLTextAreaElement, prefs: UserPreference
 };
 
 // --- Message Chat Handler ---
-const handleChatWindow = (chatForm: HTMLElement, prefs: UserPreferences) => {
-  // Prevent duplicate injections inside the same form
-  if (chatForm.querySelector(`#${CHAT_HOST_ID}`)) return;
-
+const handleChatWindow = (chatForm: HTMLElement) => {
   // Find the actual input text container (LinkedIn uses a contenteditable div)
   const editor = chatForm.querySelector('.msg-form__contenteditable, div[contenteditable="true"]') as HTMLDivElement | null;
   if (!editor) return;
-
-  const { host, root } = createShadowHost(CHAT_HOST_ID);
-  
-  // Insert before the input container form
-  chatForm.insertBefore(host, chatForm.firstChild);
 
   // Parse recipient details from chat window header
   // Under .msg-convo-wrapper, find the lockup title (name) and subtitle (headline)
@@ -106,6 +96,25 @@ const handleChatWindow = (chatForm: HTMLElement, prefs: UserPreferences) => {
       recipientHeadline = headlineEl.textContent.trim();
     }
   }
+
+  // Check if there is already an active host injected inside this form
+  const existingHost = chatForm.querySelector(`#${CHAT_HOST_ID}`) as HTMLElement | null;
+  if (existingHost) {
+    const currentRecipient = existingHost.getAttribute('data-recipient');
+    if (currentRecipient === recipientName) {
+      return; // Already injected for this recipient, skip
+    } else {
+      existingHost.remove(); // Recipient changed! Clear old container to trigger re-render
+    }
+  }
+
+  const { host, root } = createShadowHost(CHAT_HOST_ID);
+  
+  // Tag host with current recipient name to detect conversation changes
+  host.setAttribute('data-recipient', recipientName);
+  
+  // Insert before the input container form
+  chatForm.insertBefore(host, chatForm.firstChild);
 
   const profile: ProfileDetails = {
     name: recipientName,
@@ -133,27 +142,39 @@ const handleChatWindow = (chatForm: HTMLElement, prefs: UserPreferences) => {
   root.appendChild(container);
 
   const onInsertMessage = (text: string) => {
-    // Populate the contenteditable div
-    const pEl = editor.querySelector('p');
-    if (pEl) {
-      pEl.textContent = text;
-    } else {
+    editor.focus();
+
+    try {
+      // Clear current content
+      editor.innerHTML = '';
+
+      // Force range selection inside editor to trigger framework state sync
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+
+      // Use insertText command to mimic native typing so React state stays updated
+      const success = document.execCommand('insertText', false, text);
+      if (!success) {
+        throw new Error('execCommand failed');
+      }
+    } catch (e) {
+      console.warn('execCommand failed, falling back to direct DOM insertion:', e);
       editor.innerHTML = `<p>${text}</p>`;
     }
 
-    // Trigger input event to let LinkedIn's React code know there's content (so the send button enables)
+    // Fire input event to make absolutely sure the UI send button lights up
     const inputEvent = new Event('input', { bubbles: true });
     editor.dispatchEvent(inputEvent);
-
-    // Focus editor
-    editor.focus();
   };
 
   const reactRoot = createRoot(container);
   reactRoot.render(
     <ChatAssistant
       profile={profile}
-      preferences={prefs}
       nativeTextarea={editor}
       chatHistory={chatHistory}
       onInsertMessage={onInsertMessage}
@@ -163,35 +184,27 @@ const handleChatWindow = (chatForm: HTMLElement, prefs: UserPreferences) => {
 
 // --- DOM Observer & Injection Setup ---
 const initializeObserver = () => {
-  let prefs: UserPreferences;
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === 'childList') {
+        // 1. Look for Connection Modal Textarea
+        const customMessageTextarea = document.querySelector('textarea#custom-message') as HTMLTextAreaElement | null;
+        if (customMessageTextarea) {
+          handleConnectModal(customMessageTextarea);
+        }
 
-  // Fetch configurations
-  getPreferences().then((loadedPrefs) => {
-    prefs = loadedPrefs;
-
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type === 'childList') {
-          // 1. Look for Connection Modal Textarea
-          const customMessageTextarea = document.querySelector('textarea#custom-message') as HTMLTextAreaElement | null;
-          if (customMessageTextarea) {
-            handleConnectModal(customMessageTextarea, prefs);
-          }
-
-          // 2. Look for messaging forms
-          // LinkedIn uses .msg-form__container or msg-form class
-          const chatForms = Array.from(document.querySelectorAll('.msg-form, form.msg-form__container')) as HTMLElement[];
-          for (const form of chatForms) {
-            handleChatWindow(form, prefs);
-          }
+        // 2. Look for messaging forms
+        const chatForms = Array.from(document.querySelectorAll('.msg-form, form.msg-form__container')) as HTMLElement[];
+        for (const form of chatForms) {
+          handleChatWindow(form);
         }
       }
-    });
+    }
+  });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
   });
 };
 
