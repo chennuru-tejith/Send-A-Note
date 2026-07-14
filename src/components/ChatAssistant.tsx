@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sparkles, Check, Copy, RefreshCw, AlertCircle, Send } from 'lucide-react';
 import { ProfileDetails, UserPreferences, MessageTone } from '../types';
 import { getPreferences } from '../services/storage';
@@ -68,7 +68,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
     };
   }, []);
 
-  const handleGenerate = async (promptCategory: string, userText?: string) => {
+  const handleGenerate = useCallback(async (promptCategory: string, userText?: string) => {
     setLoading(true);
     setError('');
     setSuggestions([]);
@@ -104,7 +104,20 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
       setLoading(false);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
     }
-  };
+  }, [prefs, tone, profile, chatHistory]);
+
+  const lastGeneratedRef = useRef<string | null>(null);
+
+  // Auto-generate suggestions when chat opens or new message arrives
+  useEffect(() => {
+    if (!prefs.openAiKey || chatHistory.length === 0) return;
+
+    const lastMessage = chatHistory[0];
+    if (lastMessage === lastGeneratedRef.current) return;
+
+    lastGeneratedRef.current = lastMessage;
+    handleGenerate('Auto Reply', 'Formulate a natural, context-aware reply to the last message.');
+  }, [prefs.openAiKey, chatHistory, handleGenerate]);
 
   const handleCopy = (text: string, index: number) => {
     navigator.clipboard.writeText(text).then(() => {
