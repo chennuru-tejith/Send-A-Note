@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "description": "Generate highly personalized connection requests and chat messages inside LinkedIn using AI.",
   "permissions": [
-    "storage"
+    "storage",
+    "alarms",
+    "scripting",
+    "notifications"
   ],
   "host_permissions": [
     "https://*.linkedin.com/*",

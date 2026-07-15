@@ -51,3 +51,13 @@ export interface GenerationResponse {
   suggestions?: string[];
   error?: string;
 }
+
+export interface ScheduledMessage {
+  id: string;
+  recipientName: string;
+  conversationUrl: string;
+  messageText: string;
+  scheduledTime: number; // timestamp
+  status: 'pending' | 'sending' | 'sent' | 'failed';
+  error?: string;
+}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, Check, Copy, RefreshCw, AlertCircle, Send } from 'lucide-react';
-import { ProfileDetails, UserPreferences, MessageTone } from '../types';
+import { Sparkles, Check, Copy, RefreshCw, AlertCircle, Send, Calendar, Clock, Trash2 } from 'lucide-react';
+import { ProfileDetails, UserPreferences, MessageTone, ScheduledMessage } from '../types';
 import { getPreferences } from '../services/storage';
 
 interface ChatAssistantProps {
@@ -43,6 +43,14 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
   const [error, setError] = useState('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
+  // Scheduling states
+  const [showScheduler, setShowScheduler] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [scheduleText, setScheduleText] = useState('');
+  const [schedulerError, setSchedulerError] = useState('');
+  const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
+
   // Load preferences from storage and listen for updates
   useEffect(() => {
     getPreferences().then((loadedPrefs) => {
@@ -67,6 +75,130 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
       }
     };
   }, []);
+
+  // Helper to load pending schedules for this recipient
+  const loadScheduledMessages = useCallback(() => {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['scheduled_messages'], (result) => {
+        const all = result.scheduled_messages || [];
+        const filtered = all.filter((m: ScheduledMessage) => 
+          m.recipientName === profile.name && m.status === 'pending'
+        );
+        setScheduledMessages(filtered);
+      });
+    } else {
+      const cached = localStorage.getItem('scheduled_messages');
+      const all: ScheduledMessage[] = cached ? JSON.parse(cached) : [];
+      const filtered = all.filter((m) => 
+        m.recipientName === profile.name && m.status === 'pending'
+      );
+      setScheduledMessages(filtered);
+    }
+  }, [profile.name]);
+
+  // Sync scheduled messages with storage
+  useEffect(() => {
+    loadScheduledMessages();
+
+    const handleScheduledStorageChange = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (changes.scheduled_messages) {
+        const all = changes.scheduled_messages.newValue || [];
+        const filtered = all.filter((m: ScheduledMessage) => 
+          m.recipientName === profile.name && m.status === 'pending'
+        );
+        setScheduledMessages(filtered);
+      }
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener(handleScheduledStorageChange);
+    }
+
+    return () => {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.removeListener(handleScheduledStorageChange);
+      }
+    };
+  }, [loadScheduledMessages, profile.name]);
+
+  const handleScheduleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSchedulerError('');
+
+    if (!scheduleDate || !scheduleTime) {
+      setSchedulerError('Please select both date and time.');
+      return;
+    }
+
+    if (!scheduleText.trim()) {
+      setSchedulerError('Please enter some message text.');
+      return;
+    }
+
+    const combinedDateTime = new Date(`${scheduleDate}T${scheduleTime}`);
+    const timeValue = combinedDateTime.getTime();
+
+    if (isNaN(timeValue)) {
+      setSchedulerError('Invalid date or time selected.');
+      return;
+    }
+
+    if (timeValue <= Date.now()) {
+      setSchedulerError('Scheduled time must be in the future.');
+      return;
+    }
+
+    const newMsg: ScheduledMessage = {
+      id: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+      recipientName: profile.name,
+      conversationUrl: window.location.href,
+      messageText: scheduleText,
+      scheduledTime: timeValue,
+      status: 'pending'
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['scheduled_messages'], (result) => {
+         const all = result.scheduled_messages || [];
+         const updated = [...all, newMsg];
+         chrome.storage.local.set({ scheduled_messages: updated }, () => {
+           setScheduleDate('');
+           setScheduleTime('');
+           setScheduleText('');
+           setShowScheduler(false);
+           loadScheduledMessages();
+         });
+      });
+    } else {
+      const cached = localStorage.getItem('scheduled_messages');
+      const all = cached ? JSON.parse(cached) : [];
+      const updated = [...all, newMsg];
+      localStorage.setItem('scheduled_messages', JSON.stringify(updated));
+      setScheduleDate('');
+      setScheduleTime('');
+      setScheduleText('');
+      setShowScheduler(false);
+      loadScheduledMessages();
+    }
+  };
+
+  const handleCancelSchedule = (id: string) => {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['scheduled_messages'], (result) => {
+        const all = result.scheduled_messages || [];
+        const updated = all.filter((m: ScheduledMessage) => m.id !== id);
+        chrome.storage.local.set({ scheduled_messages: updated }, () => {
+          loadScheduledMessages();
+        });
+      });
+    } else {
+      const cached = localStorage.getItem('scheduled_messages');
+      const all: ScheduledMessage[] = cached ? JSON.parse(cached) : [];
+      const updated = all.filter((m) => m.id !== id);
+      localStorage.setItem('scheduled_messages', JSON.stringify(updated));
+      loadScheduledMessages();
+    }
+  };
 
   const handleGenerate = useCallback(async (promptCategory: string, userText?: string) => {
     setLoading(true);
@@ -135,18 +267,36 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
           <span className="font-semibold text-xs text-gray-900 dark:text-white">AI Reply Assistant</span>
         </div>
         
-        {/* Tone Selector */}
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-gray-400">Tone:</span>
-          <select
-            value={tone}
-            onChange={(e) => setTone(e.target.value as MessageTone)}
-            className="text-[10px] bg-gray-50 dark:bg-[#293138] border border-gray-200 dark:border-gray-700 rounded px-1.5 py-0.5 font-medium focus:outline-none"
+        {/* Tone and Schedule Controls */}
+        <div className="flex items-center gap-2">
+          {/* Tone Selector */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-400">Tone:</span>
+            <select
+              value={tone}
+              onChange={(e) => setTone(e.target.value as MessageTone)}
+              className="text-[10px] bg-gray-50 dark:bg-[#293138] border border-gray-200 dark:border-gray-700 rounded px-1.5 py-0.5 font-medium focus:outline-none"
+            >
+              {TONES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Schedule Message Toggle */}
+          <button
+            onClick={() => {
+              setShowScheduler(!showScheduler);
+              setScheduleText('');
+              setSchedulerError('');
+            }}
+            className={`p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-all ${
+              showScheduler ? 'text-linkedin-blue bg-blue-50 dark:bg-blue-950/30' : 'text-gray-400'
+            }`}
+            title="Schedule a message"
           >
-            {TONES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
+            <Calendar className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
@@ -215,6 +365,18 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
                     {copiedIndex === index ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                   </button>
                   <button
+                    onClick={() => {
+                      setScheduleText(text);
+                      setShowScheduler(true);
+                      setSchedulerError('');
+                    }}
+                    className="px-2 py-0.5 border border-gray-200 dark:border-gray-700 hover:border-linkedin-blue hover:text-linkedin-blue text-[10px] font-semibold rounded transition-all flex items-center gap-0.5"
+                    title="Schedule this reply"
+                  >
+                    <Calendar className="w-2.5 h-2.5" />
+                    <span>Schedule</span>
+                  </button>
+                  <button
                     onClick={() => onInsertMessage(text)}
                     className="px-2 py-0.5 bg-linkedin-blue hover:bg-linkedin-blue-hover text-white text-[10px] font-semibold rounded transition-all"
                   >
@@ -223,6 +385,119 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Scheduler Form (Collapsible) */}
+      {showScheduler && (
+        <form onSubmit={handleScheduleSubmit} className="mt-3 border-t border-gray-100 dark:border-gray-800 pt-3.5 space-y-2.5">
+          <div className="flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-linkedin-blue" />
+            <span className="font-semibold text-xs text-gray-900 dark:text-white">Schedule Message Send</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-gray-400 block mb-0.5">Date</label>
+              <input
+                type="date"
+                value={scheduleDate}
+                onChange={(e) => setScheduleDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+                className="w-full text-xs border border-gray-200 dark:border-gray-700 rounded bg-gray-50 dark:bg-[#293138] px-2 py-1 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-400 block mb-0.5">Time</label>
+              <input
+                type="time"
+                value={scheduleTime}
+                onChange={(e) => setScheduleTime(e.target.value)}
+                className="w-full text-xs border border-gray-200 dark:border-gray-700 rounded bg-gray-50 dark:bg-[#293138] px-2 py-1 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] text-gray-400 block mb-0.5">Message text</label>
+            <textarea
+              value={scheduleText}
+              onChange={(e) => setScheduleText(e.target.value)}
+              placeholder="Type message to schedule..."
+              className="w-full text-xs border border-gray-200 dark:border-gray-700 rounded bg-gray-50 dark:bg-[#293138] px-2 py-1.5 focus:outline-none h-16 resize-none"
+            />
+          </div>
+
+          {schedulerError && (
+            <div className="text-[10px] text-red-500 flex items-center gap-1 font-medium">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{schedulerError}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 text-xs pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setShowScheduler(false);
+                setSchedulerError('');
+              }}
+              className="px-2.5 py-1 text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 rounded font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-3 py-1 bg-linkedin-blue hover:bg-linkedin-blue-hover text-white rounded font-semibold shadow-sm"
+            >
+              Schedule Send
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Active Schedules List for this recipient */}
+      {scheduledMessages.length > 0 && (
+        <div className="mt-3 border-t border-gray-100 dark:border-gray-800 pt-2.5">
+          <div className="flex items-center justify-between pb-1.5">
+            <span className="text-[9px] font-bold tracking-wider text-gray-400 uppercase">Pending Schedules</span>
+            <span className="text-[9px] font-bold text-linkedin-blue bg-blue-50 dark:bg-blue-950 px-1.5 py-0.5 rounded">
+              {scheduledMessages.length} pending
+            </span>
+          </div>
+
+          <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+            {scheduledMessages.map((msg) => {
+              const formattedTime = new Date(msg.scheduledTime).toLocaleString([], {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              });
+
+              return (
+                <div key={msg.id} className="flex justify-between items-start gap-2 bg-gray-50/50 dark:bg-gray-800/10 border border-gray-100 dark:border-gray-800 rounded p-2 text-[11px] group">
+                  <div className="flex-1 space-y-1">
+                    <p className="text-gray-800 dark:text-gray-200 leading-snug line-clamp-2 pr-1">
+                      {msg.messageText}
+                    </p>
+                    <div className="flex items-center gap-1 text-[9px] text-gray-400 font-medium">
+                      <Clock className="w-3 h-3 text-linkedin-blue" />
+                      <span>{formattedTime}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleCancelSchedule(msg.id)}
+                    className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded transition-all shrink-0"
+                    title="Cancel scheduled send"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
