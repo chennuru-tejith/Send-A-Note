@@ -98,10 +98,28 @@ const sendScheduledMessage = async (msg: ScheduledMessage) => {
         if (!editor || !sendButton) return { success: false, error: 'LinkedIn chat container could not be found' };
 
         editor.focus();
-        editor.innerHTML = `<p>${messageText}</p>`;
+
+        try {
+          editor.innerHTML = '';
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.selectNodeContents(editor);
+          range.collapse(false);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+          if (!document.execCommand('insertText', false, messageText)) {
+            editor.innerHTML = `<p>${messageText}</p>`;
+          }
+        } catch (e) {
+          editor.innerHTML = `<p>${messageText}</p>`;
+        }
+
         editor.dispatchEvent(new Event('input', { bubbles: true }));
 
         setTimeout(() => {
+          if (sendButton.disabled) {
+            sendButton.removeAttribute('disabled');
+          }
           sendButton.click();
         }, 500);
 
