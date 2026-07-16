@@ -6,6 +6,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   defaultLength: 'Medium',
   defaultPurpose: 'Networking',
   isPremium: false,
+  senderProfile: '',
+  senderProfileName: '',
 };
 
 export const getPreferences = (): Promise<UserPreferences> => {

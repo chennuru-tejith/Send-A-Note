@@ -35,6 +35,8 @@ export interface UserPreferences {
   defaultLength: MessageLength;
   defaultPurpose: MessagePurpose;
   isPremium: boolean;
+  senderProfile?: string;
+  senderProfileName?: string;
 }
 
 export interface GenerationRequest {

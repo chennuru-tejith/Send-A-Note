@@ -43,17 +43,22 @@ ${skillsStr || 'N/A'}
     let systemPrompt = '';
     let userPrompt = '';
 
+    const senderProfileStr = preferences.senderProfile
+      ? `\n\nMy (Sender's) Background Context:\n---\n${preferences.senderProfile}\n---`
+      : '';
+
     if (type === 'connection') {
       systemPrompt = `
-You are a elite professional copywriter specializing in LinkedIn outreach.
+You are an elite professional copywriter specializing in LinkedIn outreach.
 Your task is to write highly personalized, high-converting, natural-sounding LinkedIn connection request messages.
 
 CRITICAL RULES:
 1. Under NO circumstances exceed the absolute maximum character limit of ${maxChars} characters (including spaces). Keep it strictly under ${maxChars}.
 2. Never use template greetings like "I hope you are doing well" or generic phrases like "I'd like to connect with you".
 3. Never exaggerate, hallucinate details, or overpraise the user. Sound confident, authentic, and human.
-4. Reference SPECIFIC, concrete details from their profile (e.g., their transition from consulting, their work at a specific company, or their studies at a university).
-5. Always output exactly three (3) distinct, high-quality, personalized connection note suggestions, separated by double newlines. Do not number them.
+4. Reference SPECIFIC, concrete details from the recipient's profile.
+5. If the Sender's background context is provided below, identify points of intersection (e.g. mutual industries, shared skills, or complementary roles) to make the pitch highly relevant, and write the connection note from the perspective of the sender.
+6. Always output exactly three (3) distinct, high-quality, personalized connection note suggestions, separated by double newlines. Do not number them.
 `.trim();
 
       userPrompt = `
@@ -61,6 +66,7 @@ Here is the LinkedIn profile of the person I want to connect with:
 ---
 ${serializedProfile}
 ---
+${senderProfileStr}
 
 Outreach Context/Category: ${category || 'General Professional Networking'}
 Default Tone Preference: ${preferences.defaultTone}
@@ -68,7 +74,7 @@ Default Length Preference: ${preferences.defaultLength} (Maximum limit: ${maxCha
 ${customPrompt ? `Additional Custom Instruction: "${customPrompt}"` : ''}
 
 Generate 3 unique, personalized connection request notes that match the context and tone.
-Remember: Under ${maxChars} characters each. Focus on their background and why we should connect. No placeholders.
+Remember: Under ${maxChars} characters each. Focus on their background, why we should connect, and leverage sender background if provided. No placeholders.
 `.trim();
     } else {
       // Chat message generation
@@ -83,8 +89,9 @@ Your task is to write replies that sound human, confident, concise, and professi
 CRITICAL RULES:
 1. Never sound robotic or salesy.
 2. Reference the active conversation history and/or their profile details if relevant.
-3. Keep it brief and contextual. Focus on a clear next step (e.g. scheduling a call, asking a question, thanking them).
-4. Output exactly three (3) distinct reply suggestions, separated by double newlines. Do not number them.
+3. If the Sender's background context is provided below, write the reply from the perspective of the sender, utilizing their professional experience or details to formulate the responses.
+4. Keep it brief and contextual. Focus on a clear next step (e.g. scheduling a call, asking a question, thanking them).
+5. Output exactly three (3) distinct reply suggestions, separated by double newlines. Do not number them.
 `.trim();
 
       userPrompt = `
@@ -92,6 +99,7 @@ Here is the profile details of the recipient:
 ---
 ${serializedProfile}
 ---
+${senderProfileStr}
 
 Recent Chat History (from last to first):
 ${historyStr}
@@ -100,7 +108,7 @@ Desired Action/Intent: ${category || 'Reply to Last Message'}
 Default Tone Preference: ${preferences.defaultTone}
 ${customPrompt ? `Additional Custom Instruction: "${customPrompt}"` : ''}
 
-Generate 3 unique, personalized chat reply options. Focus on the recipient's background and conversation context. No placeholders.
+Generate 3 unique, personalized chat reply options. Focus on the recipient's background, conversation context, and utilize sender background if provided. No placeholders.
 `.trim();
     }
 

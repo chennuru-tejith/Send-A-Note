@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Save, Key, Eye, EyeOff, Shield, Settings, Info, CheckCircle, Calendar, Trash2, ExternalLink, Clock, AlertCircle } from 'lucide-react';
+import { Sparkles, Save, Key, Eye, EyeOff, Shield, Settings, Info, CheckCircle, Calendar, Trash2, ExternalLink, Clock, AlertCircle, Upload, X, FileText, Check } from 'lucide-react';
 import { getPreferences, savePreferences } from '../services/storage';
 import { MessageTone, MessageLength, MessagePurpose, UserPreferences, ScheduledMessage } from '../types';
 
@@ -16,6 +16,15 @@ export const Popup: React.FC = () => {
   const [isPremium, setIsPremium] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Resume Upload states
+  const [senderProfile, setSenderProfile] = useState('');
+  const [senderProfileName, setSenderProfileName] = useState('');
+  const [resumeUploadError, setResumeUploadError] = useState('');
+
+  // CSV bulk scheduling states
+  const [csvUploadSuccess, setCsvUploadSuccess] = useState('');
+  const [csvUploadError, setCsvUploadError] = useState('');
 
   // Scheduling dashboard states
   const [activeTab, setActiveTab] = useState<'settings' | 'scheduler'>('settings');
@@ -40,6 +49,8 @@ export const Popup: React.FC = () => {
       setLength(prefs.defaultLength);
       setPurpose(prefs.defaultPurpose);
       setIsPremium(prefs.isPremium);
+      setSenderProfile(prefs.senderProfile || '');
+      setSenderProfileName(prefs.senderProfileName || '');
       setLoading(false);
     });
     loadSchedules();
@@ -54,7 +65,9 @@ export const Popup: React.FC = () => {
       defaultTone: tone,
       defaultLength: length,
       defaultPurpose: purpose,
-      isPremium
+      isPremium,
+      senderProfile,
+      senderProfileName
     };
 
     await savePreferences(updatedPrefs);
@@ -78,6 +91,140 @@ export const Popup: React.FC = () => {
       localStorage.setItem('scheduled_messages', JSON.stringify(updated));
       loadSchedules();
     }
+  };
+
+  const handleResumeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setResumeUploadError('');
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setResumeUploadError('File is too large. 5MB limit.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result;
+      if (typeof text === 'string') {
+        setSenderProfile(text);
+        setSenderProfileName(file.name);
+      } else {
+        setResumeUploadError('Could not parse text from file.');
+      }
+    };
+    reader.onerror = () => {
+      setResumeUploadError('Error reading file.');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClearResume = () => {
+    setSenderProfile('');
+    setSenderProfileName('');
+  };
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCsvUploadError('');
+    setCsvUploadSuccess('');
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result;
+      if (typeof content !== 'string') {
+        setCsvUploadError('Could not read CSV file.');
+        return;
+      }
+
+      try {
+        const lines = content.split(/\r?\n/);
+        const newSchedules: ScheduledMessage[] = [];
+        let skippedRowsCount = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          const columns: string[] = [];
+          let currentField = '';
+          let insideQuote = false;
+
+          for (let j = 0; j < line.length; j++) {
+            const char = line[j];
+            if (char === '"') {
+              insideQuote = !insideQuote;
+            } else if (char === ',' && !insideQuote) {
+              columns.push(currentField.trim());
+              currentField = '';
+            } else {
+              currentField += char;
+            }
+          }
+          columns.push(currentField.trim());
+
+          const cleanCols = columns.map(c => c.replace(/^"|"$/g, '').trim());
+
+          if (cleanCols.length < 3) {
+            skippedRowsCount++;
+            continue;
+          }
+
+          const [recipientName, conversationUrl, messageText, timeStr] = cleanCols;
+
+          if (!recipientName || !conversationUrl || !messageText) {
+            skippedRowsCount++;
+            continue;
+          }
+
+          let scheduledTime = 0;
+          if (timeStr) {
+            scheduledTime = new Date(timeStr).getTime();
+          }
+
+          if (isNaN(scheduledTime) || scheduledTime <= Date.now()) {
+            scheduledTime = Date.now() + 10 * 60 * 1000; // default 10 minutes from now
+          }
+
+          newSchedules.push({
+            id: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+            recipientName,
+            conversationUrl,
+            messageText,
+            scheduledTime,
+            status: 'pending'
+          });
+        }
+
+        if (newSchedules.length === 0) {
+          setCsvUploadError('No valid rows found in CSV. Expected headers: Name, URL, Message, Time.');
+          return;
+        }
+
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.get(['scheduled_messages'], (result) => {
+            const all = result.scheduled_messages || [];
+            const updated = [...all, ...newSchedules];
+            chrome.storage.local.set({ scheduled_messages: updated }, () => {
+              loadSchedules();
+              setCsvUploadSuccess(`Imported ${newSchedules.length} message(s) successfully!${skippedRowsCount > 0 ? ` Skipped ${skippedRowsCount} rows.` : ''}`);
+            });
+          });
+        } else {
+          const cached = localStorage.getItem('scheduled_messages');
+          const all = cached ? JSON.parse(cached) : [];
+          const updated = [...all, ...newSchedules];
+          localStorage.setItem('scheduled_messages', JSON.stringify(updated));
+          loadSchedules();
+          setCsvUploadSuccess(`Imported ${newSchedules.length} message(s) successfully!${skippedRowsCount > 0 ? ` Skipped ${skippedRowsCount} rows.` : ''}`);
+        }
+
+      } catch (err: unknown) {
+        setCsvUploadError(err instanceof Error ? err.message : 'Error parsing CSV file.');
+      }
+    };
+    reader.readAsText(file);
   };
 
   if (loading) {
@@ -242,6 +389,66 @@ export const Popup: React.FC = () => {
             </div>
           </div>
 
+          {/* Resume Upload Panel */}
+          <div className="bg-white dark:bg-[#1d2226] p-3 rounded-xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-linkedin-blue" />
+                <span className="font-semibold text-xs text-gray-900 dark:text-white">Your Resume / Background</span>
+              </div>
+              {senderProfile ? (
+                <span className="text-[9px] bg-blue-100 dark:bg-blue-950 text-linkedin-blue dark:text-blue-300 px-1.5 py-0.5 rounded font-medium">
+                  Active
+                </span>
+              ) : (
+                <span className="text-[9px] bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 px-1.5 py-0.5 rounded font-medium">
+                  Empty
+                </span>
+              )}
+            </div>
+
+            {senderProfile ? (
+              <div className="border border-blue-100 dark:border-blue-900/50 bg-blue-50/20 dark:bg-blue-950/10 rounded-lg p-2 bg-gray-50/10 dark:bg-[#293138]/20 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-800 dark:text-gray-200">
+                    <FileText className="w-3.5 h-3.5 text-linkedin-blue" />
+                    <span className="truncate max-w-[180px] text-[11px]">{senderProfileName || 'resume.txt'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClearResume}
+                    className="p-0.5 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-red-500 rounded transition-all"
+                    title="Remove Resume"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed bg-white dark:bg-[#1d2226] border border-gray-100 dark:border-gray-800 p-1.5 rounded pr-2 font-mono">
+                  {senderProfile}
+                </p>
+              </div>
+            ) : (
+              <div className="relative border border-dashed border-gray-300 dark:border-gray-700 hover:border-linkedin-blue/60 rounded-lg p-4 text-center cursor-pointer transition-all bg-gray-50/50 dark:bg-[#293138]/20 group">
+                <input
+                  type="file"
+                  accept=".txt,.md,.json"
+                  onChange={handleResumeUpload}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                <Upload className="w-6 h-6 mx-auto text-gray-400 group-hover:text-linkedin-blue transition-all mb-1" />
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Upload Resume File</p>
+                <p className="text-[9px] text-gray-400 mt-0.5">Supports .txt, .md, .json text formats</p>
+              </div>
+            )}
+
+            {resumeUploadError && (
+              <div className="text-[10px] text-red-500 flex items-center gap-1 font-medium bg-red-50/50 dark:bg-red-950/20 p-1.5 rounded">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{resumeUploadError}</span>
+              </div>
+            )}
+          </div>
+
           {/* Footer Actions */}
           <div className="flex items-center justify-between gap-3 pt-1">
             {saved ? (
@@ -263,7 +470,7 @@ export const Popup: React.FC = () => {
           </div>
         </form>
       ) : (
-        <div className="p-4 space-y-3.5 max-h-[420px] overflow-y-auto custom-scrollbar">
+        <div className="p-4 space-y-3.5 max-h-[450px] overflow-y-auto custom-scrollbar">
           <div className="flex items-center justify-between pb-0.5">
             <div className="flex items-center gap-1.5">
               <Calendar className="w-4 h-4 text-linkedin-blue" />
@@ -272,6 +479,44 @@ export const Popup: React.FC = () => {
             <span className="text-[9px] bg-blue-100 dark:bg-blue-950 text-linkedin-blue dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">
               {allSchedules.length} Total
             </span>
+          </div>
+
+          {/* CSV Bulk Scheduler Panel */}
+          <div className="bg-white dark:bg-[#1d2226] p-3 rounded-xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-xs text-gray-900 dark:text-white flex items-center gap-1.5">
+                <Upload className="w-3.5 h-3.5 text-linkedin-blue" />
+                <span>Bulk Import Schedules</span>
+              </span>
+              <span className="text-[8px] bg-gray-100 dark:bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded uppercase font-semibold">CSV</span>
+            </div>
+
+            <div className="relative border border-dashed border-gray-300 dark:border-gray-700 hover:border-linkedin-blue/60 rounded-lg p-2.5 text-center cursor-pointer transition-all bg-gray-50/50 dark:bg-[#293138]/20 group">
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleCsvUpload}
+                value=""
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              <Upload className="w-4.5 h-4.5 mx-auto text-gray-400 group-hover:text-linkedin-blue transition-all mb-1" />
+              <p className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">Upload CSV File</p>
+              <p className="text-[8px] text-gray-400 mt-0.5">Format: Name, Chat URL, Message, Date Time</p>
+            </div>
+
+            {csvUploadSuccess && (
+              <div className="text-[9px] text-green-600 dark:text-green-400 bg-green-50/50 dark:bg-green-950/20 p-1.5 rounded flex items-start gap-1 font-semibold">
+                <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{csvUploadSuccess}</span>
+              </div>
+            )}
+
+            {csvUploadError && (
+              <div className="text-[9px] text-red-500 bg-red-50/50 dark:bg-red-950/20 p-1.5 rounded flex items-start gap-1 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{csvUploadError}</span>
+              </div>
+            )}
           </div>
 
           {allSchedules.length === 0 ? (
