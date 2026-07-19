@@ -86,14 +86,17 @@ const handleChatWindow = (chatForm: HTMLElement) => {
   let recipientHeadline = '';
 
   if (threadWrapper) {
-    const nameEl = threadWrapper.querySelector('.msg-entity-lockup__title, [class*="entity-lockup__title"]');
+    let nameEl = threadWrapper.querySelector('.msg-entity-lockup__title, [class*="entity-lockup__title"]');
+    if (!nameEl) {
+      nameEl = threadWrapper.querySelector('a[href*="/in/"]');
+    }
     const headlineEl = threadWrapper.querySelector('.msg-entity-lockup__subtitle, [class*="entity-lockup__subtitle"]');
     
     if (nameEl && nameEl.textContent) {
-      recipientName = nameEl.textContent.trim().split('\n')[0];
+      recipientName = nameEl.textContent.trim().split('\n')[0].replace(/\s+/g, ' ');
     }
     if (headlineEl && headlineEl.textContent) {
-      recipientHeadline = headlineEl.textContent.trim();
+      recipientHeadline = headlineEl.textContent.trim().replace(/\s+/g, ' ');
     }
   }
 

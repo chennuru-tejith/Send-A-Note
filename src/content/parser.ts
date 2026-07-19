@@ -63,6 +63,14 @@ export class ProfileParser {
       }
     }
 
+    if (name) {
+      name = name
+        .replace(/\b(pronunciation|premium|badge|gold|member|influencer|creator|verify|verified)\b/gi, '')
+        .replace(/[•|·]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
     // 2. Parse Headline
     let headline = '';
     const headlineSelectors = [

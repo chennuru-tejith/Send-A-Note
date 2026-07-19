@@ -7,6 +7,45 @@ const TONES: MessageTone[] = ['Professional', 'Friendly', 'Formal', 'Confident',
 const LENGTHS: MessageLength[] = ['Short', 'Medium', 'Long'];
 const PURPOSES: MessagePurpose[] = ['Networking', 'Business', 'Internship', 'Mentorship', 'Recruitment', 'Sales', 'General'];
 
+const parseCSV = (text: string): string[][] => {
+  const result: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+    
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        field += '"';
+        i++; // skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      row.push(field.trim());
+      field = '';
+    } else if ((char === '\r' || char === '\n') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') {
+        i++;
+      }
+      row.push(field.trim());
+      result.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += char;
+    }
+  }
+  if (field || row.length > 0) {
+    row.push(field.trim());
+    result.push(row);
+  }
+  return result;
+};
+
 export const Popup: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -139,35 +178,21 @@ export const Popup: React.FC = () => {
       }
 
       try {
-        const lines = content.split(/\r?\n/);
+        const rows = parseCSV(content);
+        if (rows.length <= 1) {
+          setCsvUploadError('No valid rows found in CSV. Expected headers: Name, URL, Message, Time.');
+          return;
+        }
+
         const newSchedules: ScheduledMessage[] = [];
         let skippedRowsCount = 0;
 
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-
-          const columns: string[] = [];
-          let currentField = '';
-          let insideQuote = false;
-
-          for (let j = 0; j < line.length; j++) {
-            const char = line[j];
-            if (char === '"') {
-              insideQuote = !insideQuote;
-            } else if (char === ',' && !insideQuote) {
-              columns.push(currentField.trim());
-              currentField = '';
-            } else {
-              currentField += char;
-            }
-          }
-          columns.push(currentField.trim());
-
-          const cleanCols = columns.map(c => c.replace(/^"|"$/g, '').trim());
-
+        for (let i = 1; i < rows.length; i++) {
+          const cleanCols = rows[i];
           if (cleanCols.length < 3) {
-            skippedRowsCount++;
+            if (cleanCols.length > 0 && cleanCols.some(col => col)) {
+              skippedRowsCount++;
+            }
             continue;
           }
 
